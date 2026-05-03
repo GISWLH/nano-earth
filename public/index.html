@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Nano Earth Forecast Viewer</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main id="app" aria-label="Nano Earth data viewer">
+      <canvas id="field-canvas"></canvas>
+      <canvas id="particle-canvas"></canvas>
+
+      <section class="hud hud-status" aria-label="Dataset status">
+        <div class="brand-row">
+          <div>
+            <div class="brand">NANO EARTH</div>
+            <div class="strap">local six-week atmosphere</div>
+          </div>
+          <div id="week-pill" class="week-pill">W--</div>
+        </div>
+        <div id="dataset-title" class="dataset">loading local forecast</div>
+        <div class="status-grid" aria-label="Current field summary">
+          <div>
+            <span>Field</span>
+            <strong id="field-name">--</strong>
+          </div>
+          <div>
+            <span>Layer</span>
+            <strong id="level-summary">--</strong>
+          </div>
+          <div>
+            <span>Window</span>
+            <strong id="week-window">--</strong>
+          </div>
+          <div>
+            <span>Vector</span>
+            <strong id="wind-badge">--</strong>
+          </div>
+        </div>
+        <div id="readout" class="readout">--</div>
+      </section>
+
+      <section class="hud hud-menu" aria-label="Atmosphere controls">
+        <div class="panel-title">
+          <span>Atmosphere</span>
+          <strong id="variable-meta">surface + upper air</strong>
+        </div>
+
+        <label>
+          <span>Variable</span>
+          <select id="variable-select"></select>
+        </label>
+
+        <label id="layer-control">
+          <span>Pressure layer</span>
+          <select id="layer-select"></select>
+        </label>
+
+        <div class="mode-row" aria-label="View mode">
+          <button id="projection-toggle" type="button">globe</button>
+          <button id="wind-toggle" type="button">wind on</button>
+        </div>
+
+        <label>
+          <span>Field opacity</span>
+          <input id="opacity-slider" type="range" min="20" max="100" value="86">
+        </label>
+      </section>
+
+      <section class="hud hud-legend" aria-label="Color scale">
+        <div id="legend-name">--</div>
+        <canvas id="legend-canvas" width="220" height="18"></canvas>
+        <div class="legend-values">
+          <span id="legend-min">--</span>
+          <span id="legend-max">--</span>
+        </div>
+      </section>
+
+      <section class="hud hud-timeline" aria-label="Six week forecast timeline">
+        <div class="timeline-top">
+          <button id="step-back" type="button" title="Previous forecast week">prev</button>
+          <button id="play-toggle" type="button" title="Play forecast">play</button>
+          <button id="step-forward" type="button" title="Next forecast week">next</button>
+          <span id="time-label">--</span>
+        </div>
+        <input id="time-slider" type="range" min="0" max="0" value="0" aria-label="Forecast week">
+        <div id="timeline-rail" class="timeline-rail" aria-label="Forecast weeks"></div>
+      </section>
+
+      <div id="loading" class="loading">preparing field</div>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>

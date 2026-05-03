@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Local large datasets
+*.nc
+*.nc4
+*.grib
+*.grib2
+
+# Local screenshots and temporary artifacts
+nano-earth-screenshot.png
+docs/assets/app_img.png
+tmp/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
