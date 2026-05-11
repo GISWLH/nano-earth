@@ -40,7 +40,7 @@ Nano Earth 是一个本地 NetCDF / ERA5 类气象数据浏览器。它参考了
 
 ## Quick Start
 
-If `public/data` already exists, start a local static server:
+If `public/data` already exists, start the browser app with a local static server:
 
 ```powershell
 python -m http.server 8000 -d public
@@ -57,6 +57,50 @@ If port `8000` is occupied:
 ```powershell
 python -m http.server 8001 -d public
 ```
+
+### Forecast Assistant
+
+The forecast assistant in the right-side HUD is backed by a second local API service. Start it before using the `Forecast assistant` panel:
+
+```powershell
+python server_assistant.py
+```
+
+By default it listens on:
+
+```text
+http://127.0.0.1:8765/api/forecast-assistant
+```
+
+For the full app experience, run both services in separate terminals:
+
+```powershell
+python server_assistant.py
+```
+
+```powershell
+python -m http.server 8001 -d public
+```
+
+Then open:
+
+```text
+http://localhost:8001
+```
+
+If the assistant UI shows `Failed to fetch`, the browser can reach the static page but cannot reach `server_assistant.py`. Check that port `8765` is listening and restart the assistant service.
+
+Optional local assistant configuration lives in `server_assistant.local.json`, which is ignored by Git. Use it for private API keys or model overrides:
+
+```json
+{
+  "DEEPSEEK_API_KEY": "your-api-key",
+  "DEEPSEEK_MODEL": "deepseek-v4-pro",
+  "DEEPSEEK_BASE_URL": "https://api.deepseek.com/anthropic"
+}
+```
+
+Do not commit `server_assistant.local.json` or any API keys. If no model call is available, the assistant service still returns a deterministic fallback report when the local NetCDF file and generated manifest are present.
 
 ## Regenerate Data
 
@@ -131,8 +175,9 @@ upper-air fields -> upper_u_component_of_wind + upper_v_component_of_wind at the
 - Rendering: Canvas 2D
 - Coastlines: TopoJSON
 - Local server: Python static HTTP server
+- Forecast assistant: local Python API service on `127.0.0.1:8765`
 
-The project does not currently use React, Vue, Vite, WebGL, or a backend server. That keeps the repository small and easy to run locally.
+The project does not currently use React, Vue, Vite, WebGL, or a packaged backend framework. The static viewer runs independently, and `server_assistant.py` is only needed for the question-answering assistant.
 
 ## Project Structure
 
@@ -141,6 +186,9 @@ nano-earth/
   canglong_allvars_2026-04-30_2026-06-10.nc
   README.md
   AGENTS.md
+  CLAUDE.md
+  server_assistant.py
+  server_assistant.local.json  # optional local config, ignored by Git
   docs/
     assets/
       nano-earth-icon-sketch-globe-v2.png
@@ -245,15 +293,43 @@ Common extension points:
 Run syntax checks:
 
 ```powershell
-python -m py_compile scripts/preprocess_nc.py
+python -m py_compile scripts/preprocess_nc.py server_assistant.py
 node --check public/app.js
 ```
 
-Run the server and verify static assets:
+Run the static server and verify static assets:
 
 ```powershell
 Invoke-WebRequest -Uri http://localhost:8000/ -UseBasicParsing
 Invoke-WebRequest -Uri http://localhost:8000/data/manifest.json -UseBasicParsing
+```
+
+Run the assistant service and verify the API endpoint:
+
+```powershell
+python server_assistant.py
+```
+
+In another terminal:
+
+```powershell
+$body = @{
+  question = "中国未来几周温度情况？有无高温？"
+  context = @{
+    variableId = "2m_temperature"
+    variableLabel = "2m temperature"
+    variableFamily = "temperature"
+    layerIndex = 0
+    layerLabel = "surface"
+    timeIndex = 0
+    week = 1
+    projection = "globe"
+    centerLon = 105
+    centerLat = 35
+  }
+} | ConvertTo-Json -Depth 5
+
+Invoke-WebRequest -Uri http://127.0.0.1:8765/api/forecast-assistant -Method POST -ContentType "application/json" -Body $body -UseBasicParsing
 ```
 
 Optional visual check with Playwright:
