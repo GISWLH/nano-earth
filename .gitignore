@@ -12,6 +12,7 @@ __pycache__/
 nano-earth-screenshot.png
 docs/assets/app_img.png
 tmp/
+server_assistant.local.json
 
 # OS/editor noise
 .DS_Store

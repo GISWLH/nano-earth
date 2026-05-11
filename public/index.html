@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Nano Earth Forecast Viewer</title>
+    <title>Canglong Earth</title>
     <link rel="stylesheet" href="styles.css">
   </head>
   <body>
@@ -14,7 +14,7 @@
       <section class="hud hud-status" aria-label="Dataset status">
         <div class="brand-row">
           <div>
-            <div class="brand">NANO EARTH</div>
+            <div class="brand">CANGLONG EARTH</div>
             <div class="strap">local six-week atmosphere</div>
           </div>
           <div id="week-pill" class="week-pill">W--</div>
@@ -66,6 +66,66 @@
           <span>Field opacity</span>
           <input id="opacity-slider" type="range" min="20" max="100" value="86">
         </label>
+      </section>
+
+      <section class="hud hud-assistant" aria-label="Forecast assistant">
+        <div class="assistant-hero">
+          <div class="assistant-hero-copy">
+            <div class="panel-title assistant-title-row">
+              <span>Forecast assistant</span>
+              <strong id="assistant-status">idle</strong>
+            </div>
+            <div class="assistant-hero-title">EarthBot Analyst</div>
+            <div class="assistant-note">Ask about future heat, rainfall, pressure, or winds. The assistant will analyze the forecast weeks and explain each step.</div>
+          </div>
+          <div class="earthbot" aria-hidden="true">
+            <div class="earthbot-antenna"></div>
+            <div class="earthbot-head">
+              <div class="earthbot-face">
+                <span class="earthbot-eye"></span>
+                <span class="earthbot-eye"></span>
+              </div>
+              <div class="earthbot-orbit earthbot-orbit-a"></div>
+              <div class="earthbot-orbit earthbot-orbit-b"></div>
+              <div class="earthbot-continent earthbot-continent-a"></div>
+              <div class="earthbot-continent earthbot-continent-b"></div>
+              <div class="earthbot-glow"></div>
+            </div>
+            <div class="earthbot-neck"></div>
+            <div class="earthbot-body"></div>
+          </div>
+        </div>
+
+        <label class="assistant-input-wrap">
+          <span>Question</span>
+          <textarea id="assistant-input" rows="4" placeholder="e.g. Will Europe see extreme heat over the next 3 weeks?"></textarea>
+        </label>
+
+        <div class="assistant-actions">
+          <button id="assistant-submit" type="button">analyze</button>
+        </div>
+
+        <div class="assistant-grid">
+          <div class="assistant-block assistant-block-workflow">
+            <div class="assistant-block-title">Workflow</div>
+            <div id="assistant-steps" class="assistant-steps" aria-live="polite"></div>
+          </div>
+
+          <div class="assistant-block">
+            <div class="assistant-block-title">Summary</div>
+            <div id="assistant-summary" class="assistant-summary">No analysis yet.</div>
+          </div>
+
+          <div class="assistant-block assistant-block-report">
+            <div class="assistant-block-title">Report</div>
+            <div id="assistant-output" class="assistant-output">Submit a question to analyze this forecast dataset.</div>
+          </div>
+
+          <div class="assistant-block">
+            <div class="assistant-block-title">Suggested views</div>
+            <div id="assistant-suggestions" class="assistant-suggestions"></div>
+          </div>
+        </div>
       </section>
 
       <section class="hud hud-legend" aria-label="Color scale">

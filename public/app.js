@@ -29,6 +29,13 @@ const controls = {
   legendMax: document.getElementById("legend-max"),
   legend: document.getElementById("legend-canvas"),
   loading: document.getElementById("loading"),
+  assistantStatus: document.getElementById("assistant-status"),
+  assistantInput: document.getElementById("assistant-input"),
+  assistantSubmit: document.getElementById("assistant-submit"),
+  assistantSteps: document.getElementById("assistant-steps"),
+  assistantSummary: document.getElementById("assistant-summary"),
+  assistantOutput: document.getElementById("assistant-output"),
+  assistantSuggestions: document.getElementById("assistant-suggestions"),
 };
 
 const state = {
@@ -60,6 +67,9 @@ const state = {
   loadToken: 0,
   windMeta: null,
   windPairLabel: null,
+  assistantBusy: false,
+  assistantSteps: [],
+  assistantController: null,
 };
 
 const palettes = {
@@ -166,6 +176,18 @@ const palettes = {
   ],
 };
 
+const windVisuals = {
+  particleDensity: 8000,
+  particleMin: 1400,
+  particleMax: 4200,
+  particleLifetime: 70,
+  fadeAlpha: 0.91,
+  lineWidth: 1.8,
+  strokeAlpha: 0.95,
+  speedScale: 0.03,
+  segmentSteps: 2,
+};
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
@@ -174,19 +196,49 @@ function mix(a, b, t) {
   return a + (b - a) * t;
 }
 
+function colorRange(variable) {
+  const stats = variable.stats || {};
+  if (variable.family === "rain") {
+    const min = Number.isFinite(stats.min) ? Math.max(0, stats.min) : 0;
+    const max = Number.isFinite(stats.p98) ? stats.p98 : stats.max;
+    if (!Number.isFinite(max) || max <= min) {
+      return { min: 0, max: 1 };
+    }
+    return { min, max };
+  }
+
+  const min = Number.isFinite(stats.p05) ? stats.p05 : stats.min;
+  const max = Number.isFinite(stats.p95) ? stats.p95 : stats.max;
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min === max) {
+    return { min: 0, max: 1 };
+  }
+  return { min, max };
+}
+
+function normalizeColorValue(value, variable) {
+  const { min, max } = colorRange(variable);
+  const linear = clamp((value - min) / (max - min), 0, 1);
+  if (variable.family === "rain") {
+    return Math.log1p(linear * 24) / Math.log1p(24);
+  }
+  return linear;
+}
+
+function legendValueAt(t, variable) {
+  const { min, max } = colorRange(variable);
+  if (variable.family === "rain") {
+    const linear = Math.expm1(t * Math.log1p(24)) / 24;
+    return min + (max - min) * linear;
+  }
+  return min + (max - min) * t;
+}
+
 function colorFor(value, variable, alpha = 255) {
   if (!Number.isFinite(value)) {
     return [0, 0, 0, 0];
   }
-  const stats = variable.stats || {};
-  let min = Number.isFinite(stats.p05) ? stats.p05 : stats.min;
-  let max = Number.isFinite(stats.p95) ? stats.p95 : stats.max;
-  if (!Number.isFinite(min) || !Number.isFinite(max) || min === max) {
-    min = 0;
-    max = 1;
-  }
   const ramp = palettes[variable.family] || palettes.scalar;
-  const t = clamp((value - min) / (max - min), 0, 1);
+  const t = normalizeColorValue(value, variable);
   const scaled = t * (ramp.length - 1);
   const idx = Math.min(ramp.length - 2, Math.floor(scaled));
   const local = scaled - idx;
@@ -243,6 +295,220 @@ function formatWeek(time) {
   return time.label || time.iso || `step ${time.index + 1}`;
 }
 
+function assistantContext() {
+  const time = state.manifest?.times?.[state.timeIndex] || null;
+  return {
+    variableId: state.variable?.id || null,
+    variableLabel: state.variable?.label || null,
+    variableFamily: state.variable?.family || null,
+    layerIndex: state.layerIndex,
+    layerLabel: state.layer?.label || "surface",
+    timeIndex: state.timeIndex,
+    week: time?.week || state.timeIndex + 1,
+    weekWindow: time ? formatWeek(time) : null,
+    projection: state.projection,
+    centerLon: Number(state.lon0.toFixed(2)),
+    centerLat: Number(state.lat0.toFixed(2)),
+  };
+}
+
+function setAssistantBusy(busy) {
+  state.assistantBusy = busy;
+  controls.assistantSubmit.disabled = busy;
+  controls.assistantInput.disabled = busy;
+  controls.assistantStatus.textContent = busy ? "working" : "idle";
+  controls.assistantSubmit.textContent = busy ? "analyzing..." : "analyze";
+}
+
+function renderAssistantSteps() {
+  controls.assistantSteps.replaceChildren();
+  for (const step of state.assistantSteps) {
+    const row = document.createElement("div");
+    row.className = `assistant-step ${step.status}`;
+
+    const text = document.createElement("div");
+    text.className = "assistant-step-text";
+
+    const head = document.createElement("div");
+    head.className = "assistant-step-head";
+
+    const title = document.createElement("div");
+    title.className = "assistant-step-title";
+    title.textContent = step.label;
+
+    const stateTag = document.createElement("div");
+    stateTag.className = "assistant-step-state";
+    stateTag.textContent = step.status === "done" ? "done" : step.status === "error" ? "error" : step.status === "active" ? "working" : "queued";
+
+    head.append(title, stateTag);
+
+    const progress = document.createElement("div");
+    progress.className = "assistant-step-progress";
+    const progressBar = document.createElement("div");
+    progressBar.className = "assistant-step-progress-bar";
+    progressBar.style.width = `${Math.round((step.progress ?? 0) * 100)}%`;
+    progress.appendChild(progressBar);
+
+    const detail = document.createElement("div");
+    detail.className = "assistant-step-detail";
+    detail.textContent = step.detail || (step.status === "done" ? "completed" : step.status === "active" ? "working..." : "waiting...");
+
+    text.append(head, progress, detail);
+    row.append(text);
+    controls.assistantSteps.appendChild(row);
+  }
+}
+
+function resetAssistantView() {
+  state.assistantSteps = [];
+  controls.assistantSummary.textContent = "Preparing analysis...";
+  controls.assistantOutput.textContent = "Waiting for assistant response...";
+  controls.assistantSuggestions.replaceChildren();
+  renderAssistantSteps();
+}
+
+function updateAssistantPhase(phase, label, detail = "", progress = null) {
+  const index = state.assistantSteps.findIndex((step) => step.id === phase);
+  if (index === -1) {
+    state.assistantSteps.push({
+      id: phase,
+      label: label || phase,
+      status: "active",
+      detail: detail || "working...",
+      progress: progress ?? 0.08,
+    });
+  } else {
+    state.assistantSteps = state.assistantSteps.map((step, stepIndex) => {
+      if (stepIndex < index) {
+        return { ...step, status: step.status === "error" ? "error" : "done", progress: 1, detail: step.detail || "completed" };
+      }
+      if (stepIndex === index) {
+        return {
+          ...step,
+          label: label || step.label,
+          status: "active",
+          detail: detail || step.detail,
+          progress: progress ?? step.progress ?? 0.08,
+        };
+      }
+      return step;
+    });
+  }
+  renderAssistantSteps();
+}
+
+function finishAssistantPhases() {
+  state.assistantSteps = state.assistantSteps.map((step) => ({
+    ...step,
+    status: step.status === "error" ? "error" : "done",
+    progress: step.status === "error" ? step.progress ?? 0 : 1,
+    detail: step.status === "error" ? step.detail : step.detail || "completed",
+  }));
+  renderAssistantSteps();
+}
+
+function failAssistant(errorMessage) {
+  if (!state.assistantSteps.length) {
+    state.assistantSteps = [{ id: "error", label: "Assistant failed", status: "error", detail: errorMessage, progress: 1 }];
+  } else {
+    state.assistantSteps = state.assistantSteps.map((step, index) => {
+      if (index === state.assistantSteps.length - 1 && step.status === "active") {
+        return { ...step, status: "error", detail: errorMessage, progress: 1 };
+      }
+      return step;
+    });
+  }
+  renderAssistantSteps();
+  controls.assistantStatus.textContent = "error";
+  controls.assistantSummary.textContent = "Assistant failed.";
+  controls.assistantOutput.textContent = errorMessage;
+}
+
+function renderAssistantSuggestions(items = []) {
+  controls.assistantSuggestions.replaceChildren();
+  for (const item of items) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "assistant-chip";
+    button.textContent = item.label || `${item.variableLabel || item.variableId} / W${(item.timeIndex ?? 0) + 1}`;
+    button.addEventListener("click", () => {
+      if (!item.variableId) return;
+      setField(item.variableId, Number(item.timeIndex ?? state.timeIndex), Number(item.layerIndex ?? 0));
+    });
+    controls.assistantSuggestions.appendChild(button);
+  }
+}
+
+function renderAssistantResult(result) {
+  const resolved = result.resolved;
+  const resolvedText = resolved
+    ? `Resolved: ${resolved.variableLabel || resolved.variableId} / ${resolved.region || "--"} / ${resolved.resolutionSource || "question"}`
+    : null;
+  controls.assistantSummary.textContent = resolvedText ? `${result.summary || "Analysis complete."}\n${resolvedText}` : result.summary || "Analysis complete.";
+  controls.assistantOutput.textContent = result.report || "No report returned.";
+  renderAssistantSuggestions(result.suggestions || []);
+}
+
+async function runAssistantQuestion() {
+  const question = controls.assistantInput.value.trim();
+  if (!question || !state.manifest || !state.variable) return;
+  state.assistantController?.abort();
+  state.assistantController = new AbortController();
+  setAssistantBusy(true);
+  resetAssistantView();
+
+  try {
+    const response = await fetch("http://127.0.0.1:8765/api/forecast-assistant", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        question,
+        datasetSource: state.manifest.source,
+        context: assistantContext(),
+      }),
+      signal: state.assistantController.signal,
+    });
+
+    if (!response.ok || !response.body) {
+      const message = `assistant request failed (${response.status})`;
+      throw new Error(message);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const event = JSON.parse(line);
+        if (event.type === "phase") {
+          updateAssistantPhase(event.phase, event.label, event.detail || "working...", event.progress ?? null);
+          controls.assistantStatus.textContent = event.label || "working";
+        } else if (event.type === "result") {
+          finishAssistantPhases();
+          controls.assistantStatus.textContent = "ready";
+          renderAssistantResult(event.result || {});
+        } else if (event.type === "error") {
+          throw new Error(event.message || "assistant failed");
+        }
+      }
+    }
+  } catch (error) {
+    if (error.name !== "AbortError") {
+      failAssistant(error.message || "assistant failed");
+    }
+  } finally {
+    state.assistantController = null;
+    setAssistantBusy(false);
+  }
+}
+
 function resize() {
   state.dpr = Math.min(window.devicePixelRatio || 1, 2);
   state.width = Math.floor(window.innerWidth * state.dpr);
@@ -297,13 +563,49 @@ function invert(x, y) {
   return [((((lon * 180) / Math.PI + 540) % 360) - 180), (lat * 180) / Math.PI, true];
 }
 
-function sampleGrid(grid, lon, lat, variable = state.variable) {
+function sampleGridNearest(grid, lon, lat, variable = state.variable) {
   if (!grid) return NaN;
   const [nLat, nLon] = variable.shape;
   const y = clamp(Math.round(((90 - lat) / 180) * (nLat - 1)), 0, nLat - 1);
   const normalizedLon = ((lon % 360) + 360) % 360;
   const x = clamp(Math.round((normalizedLon / 360) * nLon) % nLon, 0, nLon - 1);
   return grid[y * nLon + x];
+}
+
+function shouldSmoothField(variable = state.variable) {
+  return variable?.family === "temperature" || variable?.family === "rain";
+}
+
+function sampleGridSmooth(grid, lon, lat, variable = state.variable) {
+  if (!grid) return NaN;
+  const [nLat, nLon] = variable.shape;
+  const y = clamp(((90 - lat) / 180) * (nLat - 1), 0, nLat - 1);
+  const normalizedLon = ((lon % 360) + 360) % 360;
+  const x = (((normalizedLon / 360) * nLon) % nLon + nLon) % nLon;
+
+  const y0 = Math.floor(y);
+  const y1 = Math.min(y0 + 1, nLat - 1);
+  const x0 = Math.floor(x) % nLon;
+  const x1 = (x0 + 1) % nLon;
+  const ty = y - y0;
+  const tx = x - Math.floor(x);
+
+  const v00 = grid[y0 * nLon + x0];
+  const v01 = grid[y0 * nLon + x1];
+  const v10 = grid[y1 * nLon + x0];
+  const v11 = grid[y1 * nLon + x1];
+
+  if ([v00, v01, v10, v11].some((value) => !Number.isFinite(value))) {
+    return sampleGridNearest(grid, lon, lat, variable);
+  }
+
+  const top = mix(v00, v01, tx);
+  const bottom = mix(v10, v11, tx);
+  return mix(top, bottom, ty);
+}
+
+function sampleGrid(grid, lon, lat, variable = state.variable, smooth = shouldSmoothField(variable)) {
+  return smooth ? sampleGridSmooth(grid, lon, lat, variable) : sampleGridNearest(grid, lon, lat, variable);
 }
 
 async function loadGrid(variable, layerIndex, timeIndex) {
@@ -386,11 +688,9 @@ function drawLegend() {
   const width = controls.legend.width;
   const height = controls.legend.height;
   const img = ctx.createImageData(width, height);
-  const stats = state.colorMeta.stats;
-  const min = Number.isFinite(stats.p05) ? stats.p05 : stats.min;
-  const max = Number.isFinite(stats.p95) ? stats.p95 : stats.max;
+  const { min, max } = colorRange(state.colorMeta);
   for (let x = 0; x < width; x += 1) {
-    const value = min + (max - min) * (x / (width - 1));
+    const value = legendValueAt(x / (width - 1), state.colorMeta);
     const color = colorFor(value, state.colorMeta, 255);
     for (let y = 0; y < height; y += 1) {
       const idx = (y * width + x) * 4;
@@ -600,12 +900,16 @@ function randomParticle() {
   return {
     lon: Math.random() * 360 - 180,
     lat: Math.asin(Math.random() * 2 - 1) * (180 / Math.PI),
-    age: Math.floor(Math.random() * 80),
+    age: Math.floor(Math.random() * windVisuals.particleLifetime),
   };
 }
 
 function resetParticles() {
-  const count = clamp(Math.floor((state.width * state.height) / 17000), 550, 1800);
+  const count = clamp(
+    Math.floor((state.width * state.height) / windVisuals.particleDensity),
+    windVisuals.particleMin,
+    windVisuals.particleMax,
+  );
   state.particles = Array.from({ length: count }, randomParticle);
   particleCtx.clearRect(0, 0, state.width, state.height);
 }
@@ -615,35 +919,50 @@ function drawParticles() {
   if (!state.windEnabled || !state.windU || !state.windV || !state.width) return;
   particleCtx.save();
   particleCtx.globalCompositeOperation = "destination-in";
-  particleCtx.fillStyle = "rgba(0,0,0,0.9)";
+  particleCtx.fillStyle = `rgba(0,0,0,${windVisuals.fadeAlpha})`;
   particleCtx.fillRect(0, 0, state.width, state.height);
   particleCtx.restore();
 
   particleCtx.save();
-  particleCtx.lineWidth = state.dpr * 0.78;
-  particleCtx.strokeStyle = "rgba(235,224,190,0.64)";
+  particleCtx.lineWidth = state.dpr * windVisuals.lineWidth;
+  particleCtx.strokeStyle = `rgba(235,224,190,${windVisuals.strokeAlpha})`;
   particleCtx.beginPath();
 
   for (const p of state.particles) {
-    if (p.age++ > 105) {
+    if (p.age++ > windVisuals.particleLifetime) {
       Object.assign(p, randomParticle());
       continue;
     }
-    const u = sampleGrid(state.windU, p.lon, p.lat, state.windMeta || state.variable);
-    const v = sampleGrid(state.windV, p.lon, p.lat, state.windMeta || state.variable);
-    if (!Number.isFinite(u) || !Number.isFinite(v)) {
+
+    let lon = p.lon;
+    let lat = p.lat;
+    let ok = true;
+
+    for (let step = 0; step < windVisuals.segmentSteps; step += 1) {
+      const u = sampleGrid(state.windU, lon, lat, state.windMeta || state.variable);
+      const v = sampleGrid(state.windV, lon, lat, state.windMeta || state.variable);
+      if (!Number.isFinite(u) || !Number.isFinite(v)) {
+        ok = false;
+        break;
+      }
+      const [x0, y0, ok0] = project(lon, lat);
+      const cosLat = Math.max(0.16, Math.cos((lat * Math.PI) / 180));
+      lon = ((((lon + (u * windVisuals.speedScale) / cosLat + 540) % 360) + 360) % 360) - 180;
+      lat = clamp(lat + v * windVisuals.speedScale, -88, 88);
+      const [x1, y1, ok1] = project(lon, lat);
+      if (ok0 && ok1 && Math.abs(x1 - x0) < state.width * 0.35) {
+        particleCtx.moveTo(x0, y0);
+        particleCtx.lineTo(x1, y1);
+      }
+    }
+
+    if (!ok) {
       Object.assign(p, randomParticle());
       continue;
     }
-    const [x0, y0, ok0] = project(p.lon, p.lat);
-    const cosLat = Math.max(0.16, Math.cos((p.lat * Math.PI) / 180));
-    p.lon = ((((p.lon + (u * 0.018) / cosLat + 540) % 360) + 360) % 360) - 180;
-    p.lat = clamp(p.lat + v * 0.018, -88, 88);
-    const [x1, y1, ok1] = project(p.lon, p.lat);
-    if (ok0 && ok1 && Math.abs(x1 - x0) < state.width * 0.35) {
-      particleCtx.moveTo(x0, y0);
-      particleCtx.lineTo(x1, y1);
-    }
+
+    p.lon = lon;
+    p.lat = lat;
   }
   particleCtx.stroke();
   particleCtx.restore();
@@ -753,6 +1072,13 @@ function bindEvents() {
     state.opacity = Number(controls.opacity.value) / 100;
     renderField();
   });
+  controls.assistantSubmit.addEventListener("click", () => runAssistantQuestion());
+  controls.assistantInput.addEventListener("keydown", (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+      event.preventDefault();
+      runAssistantQuestion();
+    }
+  });
   setInterval(() => {
     if (state.playing && state.variable) stepTime(1);
   }, 1800);
@@ -804,6 +1130,9 @@ function renderVariableOptions() {
 async function init() {
   bindEvents();
   resize();
+  resetAssistantView();
+  controls.assistantSummary.textContent = "Ready to analyze forecast questions.";
+  controls.assistantOutput.textContent = "Ask a question such as: Will Europe see extreme heat over the next 3 weeks?";
   const [manifest] = await Promise.all([
     fetch("data/manifest.json").then((res) => res.json()),
     loadLand(),
