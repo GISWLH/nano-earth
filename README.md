@@ -1,3 +1,7 @@
+<!-- readme-visual-refresh:banner -->
+![nano-earth — hand-drawn project banner](assets/readme/banner.svg)
+<!-- /readme-visual-refresh:banner -->
+
 <p align="center">
   <img src="docs/assets/nano-earth-icon-sketch-tiles-v2.png" width="170" alt="Nano Earth hand-drawn globe icon">
 </p>
@@ -350,3 +354,7 @@ npx --yes playwright screenshot --wait-for-timeout=3000 http://localhost:8000/ .
 ## Notes
 
 Nano Earth is designed for local data exploration. It is not a direct copy of earth.nullschool.net and does not bundle that site's assets. The current implementation borrows the broad interaction idea of a globe-based weather viewer while using an independent data pipeline and renderer.
+
+<!-- readme-visual-refresh:artwork-source -->
+[Editable banner artwork · Excalidraw](assets/readme/banner.excalidraw)
+<!-- /readme-visual-refresh:artwork-source -->
